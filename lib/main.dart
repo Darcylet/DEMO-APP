@@ -5,11 +5,14 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
-void main() => runApp(const DemoApp());
+void main() => runApp(const Application());
 
-class DemoApp extends StatelessWidget {
-  const DemoApp({super.key});
+class Application extends StatelessWidget {
+  const Application({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -18,19 +21,19 @@ class DemoApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => CatalogViewModel()..init()),
         ChangeNotifierProvider(create: (_) => AppSettings()),
       ],
-      child: const DemoAppWithTheme(),
+      child: const ApplicationWithTheme(),
     );
   }
 }
 
-class DemoAppWithTheme extends StatefulWidget {
-  const DemoAppWithTheme({super.key});
+class ApplicationWithTheme extends StatefulWidget {
+  const ApplicationWithTheme({super.key});
 
   @override
-  State<DemoAppWithTheme> createState() => _DemoAppWithThemeState();
+  State<ApplicationWithTheme> createState() => _ApplicationWithThemeState();
 }
 
-class _DemoAppWithThemeState extends State<DemoAppWithTheme> {
+class _ApplicationWithThemeState extends State<ApplicationWithTheme> {
   ThemeMode _mode = ThemeMode.light;
   Color _seed = const Color(0xFF6750A4);
 
@@ -387,22 +390,60 @@ class DialogsScreen extends StatelessWidget {
 }
 
 // --------------------------- PROGRESS ---------------------------
+
 class ProgressScreen extends StatefulWidget {
   const ProgressScreen({super.key});
+
   @override
   State<ProgressScreen> createState() => _ProgressScreenState();
 }
 
 class _ProgressScreenState extends State<ProgressScreen> {
+  File? _imageFile;
   double _progress = 0;
   Timer? _timer;
+  bool _isProcessing = false;
+  bool _uploadComplete = false;
 
-  void _start() {
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+    if (pickedFile != null) {
+      setState(() {
+        _imageFile = File(pickedFile.path);
+        _progress = 0;
+        _isProcessing = false;
+        _uploadComplete = false;
+      });
+      _startFakeUpload();
+    }
+  }
+
+  void _startFakeUpload() {
     _timer?.cancel();
-    setState(() => _progress = 0);
+    _progress = 0;
+
     _timer = Timer.periodic(const Duration(milliseconds: 60), (t) {
-      setState(() => _progress = (_progress + 0.02).clamp(0, 1));
-      if (_progress >= 1) t.cancel();
+      setState(() {
+        _progress = (_progress + 0.02).clamp(0, 1);
+      });
+
+      if (_progress >= 1) {
+        t.cancel();
+        _startProcessing();
+      }
+    });
+  }
+
+  void _startProcessing() {
+    setState(() {
+      _uploadComplete = true;
+      _isProcessing = true;
+    });
+
+    Future.delayed(const Duration(seconds: 2), () {
+      setState(() => _isProcessing = false);
     });
   }
 
@@ -412,29 +453,85 @@ class _ProgressScreenState extends State<ProgressScreen> {
     super.dispose();
   }
 
+  Widget _buildSkeletonLoader() {
+    return Shimmer.fromColors(
+      baseColor: Colors.grey.shade300,
+      highlightColor: Colors.grey.shade100,
+      child: Container(
+        height: 200,
+        width: double.infinity,
+        color: Colors.white,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Text('Progress Indicators', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 12),
-        Row(children: const [
-          CircularProgressIndicator(),
-          SizedBox(width: 16),
-          Expanded(child: LinearProgressIndicator()),
-        ]),
-        const SizedBox(height: 24),
-        const Text('Determinate example (file upload simulation)'),
-        const SizedBox(height: 8),
-        LinearProgressIndicator(value: _progress),
-        const SizedBox(height: 8),
-        Row(children: [
-          FilledButton(onPressed: _start, child: const Text('Start')),
-          const SizedBox(width: 12),
-          Text('${(_progress * 100).toStringAsFixed(0)}%'),
-        ]),
-      ],
+    return Scaffold(
+      appBar: AppBar(title: const Text("Image Upload Simulation")),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            if (_imageFile != null) ...[
+              Container(
+                height: 200,
+                width: double.infinity,
+                alignment: Alignment.center,
+                color: Colors.grey.shade200,
+                child: Stack(
+                  children: [
+                    // Uploading placeholder
+                    if (!_uploadComplete)
+                      Container(color: Colors.grey.shade200),
+
+                    // Skeleton loader while processing
+                    if (_uploadComplete && _isProcessing)
+                      _buildSkeletonLoader(),
+
+                    // Final image
+                    if (_uploadComplete && !_isProcessing)
+                      Center(
+                        child: Image.file(
+                          _imageFile!,
+                          fit: BoxFit.contain,
+                          height: 200,
+                        ),
+                      ),
+
+    
+                    if (!_uploadComplete || _isProcessing)
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          child: LinearProgressIndicator(
+                            value: !_uploadComplete ? _progress : null, 
+                          ),
+                        ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              // Status text
+              if (!_uploadComplete)
+                Text("${(_progress * 100).toStringAsFixed(0)}%")
+              else if (_isProcessing)
+                const Text("Processing...")
+              else
+                const Text("✅ Upload Complete"),
+            ] else
+              const Text("No image selected"),
+
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: _pickImage,
+              child: const Text("Pick Image & Upload"),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
